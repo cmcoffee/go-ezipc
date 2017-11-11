@@ -2,13 +2,13 @@ package main
 
 import (
 	"fmt"
-	"sync"
 	"github.com/cmcoffee/go-blab"
+	"sync"
 )
 
 type KV struct {
 	mlock sync.RWMutex
-	data map[string]string
+	data  map[string]string
 }
 
 var myKV KV
@@ -17,31 +17,37 @@ func init() {
 	myKV.data = make(map[string]string)
 }
 
-func (c *KV) Set(key string, value *string) (error) {
+func (c *KV) Set(key string, value *string) error {
 	c.mlock.Lock()
 	defer c.mlock.Unlock()
 	c.data[key] = *value
 	return nil
 }
 
-func (c *KV) Get(key string, output *string) (error) {
+func (c *KV) Get(key string, output *string) error {
 	c.mlock.RLock()
 	defer c.mlock.RUnlock()
 	v, ok := c.data[key]
-	if !ok { return fmt.Errorf("Key not found.") }
+	if !ok {
+		return fmt.Errorf("Key not found.")
+	}
 	*output = v
 	return nil
 }
 
-func countKeys(unused int, count *int) (error) {
+func countKeys(unused int, count *int) error {
 	myKV.mlock.RLock()
 	defer myKV.mlock.RUnlock()
-	for _ = range myKV.data { *count++ }
+	for _ = range myKV.data {
+		*count++
+	}
 	return nil
 }
 
 func main() {
 	cl := blab.NewCaller()
+	blab.Debug = true
+
 	err := cl.Register(&myKV)
 	if err != nil {
 		fmt.Printf("Error: %s\n", err)
