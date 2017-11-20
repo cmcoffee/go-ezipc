@@ -5,7 +5,6 @@ import (
 	"github.com/cmcoffee/go-blab"
 	"sync"
 )
-
 type KV struct {
 	mlock sync.RWMutex
 	data  map[string]string
@@ -44,9 +43,13 @@ func countKeys(unused int, count *int) error {
 	return nil
 }
 
+func Ping(unused int, unused2 *int) error {
+	return nil
+}
+
 func main() {
-	cl := blab.NewCaller()
-	blab.Debug = true
+	cl := blab.New()
+	cl.Debug = false
 
 	err := cl.Register(&myKV)
 	if err != nil {
@@ -55,6 +58,9 @@ func main() {
 	}
 
 	cl.RegisterName("KVCount", countKeys)
+
+	err = cl.RegisterName("Ping", Ping)
+	if err != nil { fmt.Println(err)}
 
 	fmt.Println("Listening for requests!")
 

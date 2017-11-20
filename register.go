@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+	"encoding/base64"
 )
 
 // Wraps function to handle incoming and outgoing IPC msgs.
@@ -67,15 +68,27 @@ func wrapFunc(fptr interface{}) (newFunc func(*msg) *msg, err error) {
 		req.Dst = req.Src
 		req.Src = origDest
 
-		err = json.Unmarshal(req.Va1, in.Interface())
-		req.Va1 = nil
+		Va1, err := base64.StdEncoding.DecodeString(req.Va1)
 		if err != nil {
 			req.Err = err.Error()
 			return req
 		}
 
-		err := json.Unmarshal(req.Va2, out.Interface())
-		req.Va2 = nil
+		Va2, err := base64.StdEncoding.DecodeString(req.Va2)
+		if err != nil {
+			req.Err = err.Error()
+			return req
+		}
+
+		err = json.Unmarshal(Va1, in.Interface())
+		req.Va1 = ""
+		if err != nil {
+			req.Err = err.Error()
+			return req
+		}
+
+		err = json.Unmarshal(Va2, out.Interface())
+		req.Va2 = ""
 		if err != nil {
 			req.Err = err.Error()
 			return req
@@ -87,10 +100,13 @@ func wrapFunc(fptr interface{}) (newFunc func(*msg) *msg, err error) {
 			return req
 		}
 
-		req.Va2, err = json.Marshal(out.Interface())
+		json_out, err := json.Marshal(out.Interface())
 		if err != nil {
 			req.Err = err.Error()
+			return req
 		}
+
+		req.Va2 = base64.StdEncoding.EncodeToString(json_out)
 
 		return req
 	}
@@ -101,18 +117,18 @@ func wrapFunc(fptr interface{}) (newFunc func(*msg) *msg, err error) {
 // Function/method template should follow:
 // func name(argType T1, replyType *T2) error
 // func (*T) Name(argType T1, replyType *T2) error
-func (cl *Caller) Register(fptr interface{}) error { return cl.RegisterName("", fptr) }
+func (r *router) Register(fptr interface{}) error { return r.RegisterName("", fptr) }
 
 // RegisterName operates exactly as Register but allows changing the name of the object or function.
-func (cl *Caller) RegisterName(name string, fptr interface{}) (err error) {
-	if cl.session == nil {
-		*cl = *NewCaller()
-	}
-
+func (r *router) RegisterName(name string, fptr interface{}) (err error) {
 	index_method := func(name string, wFunc func(*msg) *msg) {
-		cl.localMapLock.Lock()
-		cl.localMap[name] = wFunc
-		cl.localMapLock.Unlock()
+		new_func := &connection{
+			name: name,
+			routes: []string{name},
+			router: r,
+			exec: wFunc,
+		}
+		r.add_route(name, new_func)
 	}
 
 	// Allows registration of both functions and methods.
@@ -133,11 +149,11 @@ func (cl *Caller) RegisterName(name string, fptr interface{}) (err error) {
 		index_method(name, wFunc)
 
 		// send command registration to dispatcher.
-		if cl.uplink != nil {
-			data, _ := json.Marshal(name)
-			cl.route(&msg{
-				Tag: regAddr,
-				Va1: data,
+		if r.uplink != nil {
+			//data, _ := json.Marshal(name)
+			r.route(&msg{
+				Src: name,
+				Tag: 0,
 			})
 		}
 	case reflect.Ptr:
@@ -153,10 +169,9 @@ func (cl *Caller) RegisterName(name string, fptr interface{}) (err error) {
 			if unicode.ToUpper(method_ch) != method_ch {
 				continue
 			}
-			err_s := cl.RegisterName(method_name, method.Interface())
+			err_s := r.RegisterName(method_name, method.Interface())
 			if err_s != nil {
-				err = fmt.Errorf("Registration failed for [%s.%s]: %s", name, ft.Method(i).Name, err_s)
-				cl.log.Println(err)
+				return fmt.Errorf("Registration failed for [%s.%s]: %s", name, ft.Method(i).Name, err_s)
 			}
 
 		}
@@ -167,11 +182,11 @@ func (cl *Caller) RegisterName(name string, fptr interface{}) (err error) {
 }
 
 // Built-in function to register client & peer functions.
-func (s *session) register(req *msg) {
-	var name string
-	json.Unmarshal(req.Va1, &name)
+func (s *router) register(req *msg) {
+	//var name string
+	//json.Unmarshal(req.Va1, &name)
 	s.connMapLock.RLock()
 	src := s.connMap[req.Src]
 	s.connMapLock.RUnlock()
-	s.add_route(name, src)
+	s.add_route(req.Src, src)
 }

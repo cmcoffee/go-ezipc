@@ -27,10 +27,7 @@ package blab
 
 import (
 	"bytes"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -40,16 +37,11 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"fmt"
 )
 
 var ErrFail = errors.New("Request failed, service unavailable.")
 var ErrClosed = errors.New("Connection closed.")
-
-// Enable Communication Debugging.
-var Debug = false
-
-// Limit maximum number of concurrent connections/processes.
-var ConnectionLimit = 256
 
 // Message Packet.
 type msg struct {
@@ -57,52 +49,56 @@ type msg struct {
 	Src string
 	Tag int32
 	Err string
-	Va1 []byte
-	Va2 []byte
+	Va1 string
+	Va2 string
+	conn *connection
 }
 
-// The Caller object is for both producers(registering methods/functions) and consumers(calls registered methods/functions).
-type Caller struct {
-	*session
-	fork    bool
-	limiter chan struct{}
-}
-
-// IPC Session.
-type session struct {
+// IPC router.
+type router struct {
 	// the socket file.
 	socketf string
 	// uplink is used to designate our dispatcher.
 	uplink *connection
-	// log is used for logging errors generated from background routines.
+	// log is used for logging routing errors.
 	log *log.Logger
-	// reqMap is for outbound request handling.
-	reqMap     map[int32]*bucket
-	reqMapLock sync.RWMutex
-	// localMap is for local methods/function lookup and execution.
-	localMap     map[string]func(*msg) *msg
-	localMapLock sync.RWMutex
-	// busyMap is so a Caller can request the status of a function already being fulfilled.
-	busyMap     map[string]map[int32]struct{}
-	busyMapLock sync.RWMutex
+	// tagMap is for keeping track of requests.
+	tagMap     map[int32]interface{}
+	tagMapLock sync.RWMutex
 	// connMap keeps track of all routes that we can send from, if not matched here, send to uplink if avaialble, send Err if not.
 	connMap     map[string]*connection
 	connMapLock sync.RWMutex
-	// peerLock is used to prevent multiple peer connections going to the same location.
-	peerLock int32
-	// ServeNode
-	serveNode *Caller
+	// Flag to tell if connection is established and ready.
 	ready     uint32
+	// Determines if we are a client or a server.
+	is_client bool
+	// Limits ammount of open connections.
+	limiter chan struct{}
+	// Sets debug flag for traffic monitoring.
+	Debug bool
 }
 
 // IPC Connection.
 type connection struct {
+	name     string
 	conn     net.Conn
-	enc      *json.Encoder
-	sess     *session
-	id       string
+	router   *router
 	routes   []string
 	sendLock sync.Mutex
+	exec     func(*msg) *msg
+}
+
+// Logs sending and receiving of messages.
+func (c connection) debugRequest(prefix string, request *msg) {
+	if request.Tag == 0 {
+		if c.name == "" {
+			c.router.log.Printf("[%s] %s Greetings!\n", request.Src, prefix)
+		} else {
+			c.router.log.Printf("[%s] %s Route announcement for \"%s\"\n", c.name, prefix, request.Src)
+		}
+	} else {
+		c.router.log.Printf("[%s] %s - Dst:%s, Src:%s, Tag:%d, Err:%s\n", c.name, prefix, request.Dst, request.Src, request.Tag, request.Err)
+	}
 }
 
 // Decodes msg.
@@ -125,79 +121,57 @@ func decMessage(in []byte) (out *msg, err error) {
 	}
 	out.Tag = int32(tag)
 
-	va1, err := base64.StdEncoding.DecodeString(msgPart[4])
-	if err != nil {
-		return
-	}
-	out.Va1 = va1
-
-	va2, err := base64.StdEncoding.DecodeString(msgPart[5])
-	if err != nil {
-		return
-	}
-	out.Va2 = va2
+	out.Va1 = msgPart[4]
+	out.Va2 = msgPart[5]
 
 	return
 }
 
-// Allocates new Caller.
-func NewCaller() *Caller {
-	limiter := make(chan struct{}, ConnectionLimit)
-	for i := 0; i < ConnectionLimit; i++ {
-		limiter <- struct{}{}
-	}
-	return &Caller{
-		newSession(),
-		true,
-		limiter,
+// Sets connection limit for maximum IPC connections.
+func (r *router) SetLimiter(connlimit int) {
+	r.limiter = make(chan struct{}, connlimit)
+	for i := 0; i < connlimit; i++ {
+		r.limiter <- struct{}{}
 	}
 }
 
-// Creates a new blab session.
-func newSession() *session {
-	return &session{
+// Creates a new blab router.
+func New() *router {
+	r := &router{
 		uplink:   nil,
 		log:      log.New(os.Stdout, "", log.LstdFlags),
-		reqMap:   make(map[int32]*bucket),
-		localMap: make(map[string]func(*msg) *msg),
-		busyMap:  make(map[string]map[int32]struct{}),
-		connMap:  make(map[string]*connection),
+		tagMap:   make(map[int32]interface{}, 128),
+		connMap:  make(map[string]*connection, 128),
+		Debug: false,
 	}
+	r.SetLimiter(256)
+	return r
 }
 
 // Directs error output to a specified io.Writer, defaults to os.Stdout.
-func (cl *Caller) SetOutput(w io.Writer) {
-	if cl.log == nil {
-		*cl = *NewCaller()
-	}
-	cl.log = log.New(w, "", 0)
-	if cl.serveNode != nil {
-		cl.serveNode.log = cl.log
-	}
+func (r *router) SetLogWriter(w io.Writer) {
+	r.log = log.New(w, "", 0)
 	return
 }
 
-// Listens to socket files(socketf) for Callers.
-// If socketf is not open, Listen opens the file and connects itself to it. (producers)
-func (cl *Caller) Listen(socketf string) (err error) {
-	cl.fork = false
+// Creates socket file(socketf) connection to Broker, forks goroutine and returns. (consumers)
+func (r *router) Dial(socketf string) error {
+	r.is_client = true
+	return r.open(socketf)
+}
+
+
+// Listens to socket files(socketf) for clients.
+func (r *router) Listen(socketf string) (err error) {
+	r.is_client = false
 
 	// Attempt to open socket file, if this works, stop here and serve.
-	err = cl.open(socketf)
+	err = r.open(socketf)
 	if err == nil || !strings.Contains(err.Error(), "connection refused") && !strings.Contains(err.Error(), "no such file or directory") {
 		return err
 	}
 
-	// If not, we need to continue onward and setup a new socket file.
-	if cl.session == nil {
-		*cl = *NewCaller()
-	}
-
-	server := NewCaller()
-
-	server.socketf = socketf
-	server.log = cl.log
-	cl.socketf = socketf
+	r.socketf = socketf
 
 	// Clean out old socket files.
 	s_split := strings.Split(socketf, "/")
@@ -223,69 +197,49 @@ func (cl *Caller) Listen(socketf string) (err error) {
 		return err
 	}
 
-	cl.serveNode = server
-
-	server.localMapLock.Lock()
-	cl.localMapLock.RLock()
-	for name, _ := range cl.localMap {
-		server.localMap[name] = cl.localMap[name]
-	}
-	server.localMapLock.Unlock()
-	cl.localMapLock.RUnlock()
-
 	for {
-		<-cl.limiter
+		<-r.limiter
 		conn, err := l.Accept()
 		if err != nil {
 			return err
 		}
-		c := server.addconnection(conn)
+		c := r.addconnection(conn)
 
 		// Spin connection off to go thread.
 		go func() {
 			err = c.reciever()
 			if err != ErrClosed {
-				if Debug {
-					cl.log.Println(err)
-				}
+				r.log.Println(err)
+				r.limiter <- struct{}{}
 				return
 			}
-			cl.limiter <- struct{}{}
+			r.limiter <- struct{}{}
 		}()
 	}
 }
 
-// Creates socket file(socketf) connection to Broker, forks goroutine and returns. (consumers)
-func (cl *Caller) Dial(socketf string) error {
-	cl.fork = true
-	return cl.open(socketf)
-}
-
 // Creates socket connection to file(socketf) launches listener, forks goroutine or blocks depending on method wrapper called.
-func (cl *Caller) open(socketf string) error {
-	if cl.session == nil {
-		*cl = *NewCaller()
-	}
-
+func (r *router) open(socketf string) error {
 	conn, err := net.Dial("unix", socketf)
 	if err != nil {
 		return err
 	}
-	c := cl.addconnection(conn)
+	c := r.addconnection(conn)
 
-	cl.socketf = socketf
-	cl.uplink = c
+	r.socketf = socketf
+	r.uplink = c
 
 	var done uint32
 	atomic.StoreUint32(&done, 1)
 
 	// If this is a service, we'll return the actual listener, if not push to background.
-	if !cl.fork {
+	if !r.is_client {
 		return c.reciever()
 	} else {
 		go func() {
 			if err := c.reciever(); err != nil && err != ErrClosed {
-				cl.log.Println(err)
+				r.log.Printf("[Receiver Error] %v\n", err)
+				
 			}
 		}()
 		return nil
@@ -312,26 +266,22 @@ func (c *connection) reciever() (err error) {
 	var pbuf []byte
 
 	// Register all local functions with uplink or peer.
-
-	data, _ := json.Marshal(myAddr)
 	c.send(&msg{
-		Tag: regSelf,
-		Va1: data,
+		Src: myAddr,
+		Tag: 0,
 	})
 
-	if c.sess.uplink != nil {
-		c.sess.localMapLock.RLock()
-		for name, _ := range c.sess.localMap {
-			data, _ := json.Marshal(name)
+	if c.router.uplink != nil {
+		c.router.connMapLock.RLock()
+		for name, _ := range c.router.connMap {
 			c.send(&msg{
-				Src: myAddr,
-				Tag: regAddr,
-				Va1: data,
+				Src: name,
+				Tag: 0,
 			})
 		}
-		c.sess.localMapLock.RUnlock()
+		c.router.connMapLock.RUnlock()
 	}
-	atomic.StoreUint32(&c.sess.ready, 1)
+
 	// Reciever loop for incoming messages.
 	for {
 		for n, _ := range input {
@@ -363,17 +313,13 @@ func (c *connection) reciever() (err error) {
 				c.close()
 				return
 			}
-			if Debug {
-				switch request.Tag {
-				case regAddr:
-					fmt.Printf("Recv: [%s] Registering Function: %s\n", c.id, request.Va1)
-				case regSelf:
-					fmt.Printf("Recv: Received registration from %s.\n", request.Va1[1:len(request.Va1)-1])
-				default:
-					fmt.Printf("Recv: [%s] Src: %s Dst: %s Tag: %d Err: %s \n", c.id, request.Src, request.Dst, request.Tag, request.Err)
-				}
+			if c.router.Debug {
+				c.debugRequest("Recv", request)
 			}
-			c.sess.switchboard(c, request)
+
+			request.conn = c
+
+			c.router.switchboard(request)
 
 			if len(pbuf)-s > 1 {
 				pbuf = pbuf[s+1:]
