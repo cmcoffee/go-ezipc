@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 	"encoding/base64"
+	"net"
 )
 
 // Wraps function to handle incoming and outgoing IPC msgs.
@@ -64,10 +65,6 @@ func wrapFunc(fptr interface{}) (newFunc func(*msg) *msg, err error) {
 	// Create new function that recieves *MSG and outputs *MSG.
 	newFunc = func(req *msg) *msg {
 		// Flip destination and source for return message.
-		origDest := req.Dst
-		req.Dst = req.Src
-		req.Src = origDest
-
 		Va1, err := base64.StdEncoding.DecodeString(req.Va1)
 		if err != nil {
 			req.Err = err.Error()
@@ -121,16 +118,6 @@ func (r *router) Register(fptr interface{}) error { return r.RegisterName("", fp
 
 // RegisterName operates exactly as Register but allows changing the name of the object or function.
 func (r *router) RegisterName(name string, fptr interface{}) (err error) {
-	index_method := func(name string, wFunc func(*msg) *msg) {
-		new_func := &connection{
-			name: name,
-			routes: []string{name},
-			router: r,
-			exec: wFunc,
-		}
-		r.add_route(name, new_func)
-	}
-
 	// Allows registration of both functions and methods.
 	// Register function if provided function, register all methods if provided an object.
 
@@ -146,16 +133,16 @@ func (r *router) RegisterName(name string, fptr interface{}) (err error) {
 		}
 
 		// Add wrapped method to local method map.
-		index_method(name, wFunc)
+		r.route(&msg{
+			Dst: name,
+			Tag: 0,
+			conn: &connection{
+				routes: []string{name},
+				router: r,
+				exec: wFunc, 
+			},
+		})
 
-		// send command registration to dispatcher.
-		if r.uplink != nil {
-			//data, _ := json.Marshal(name)
-			r.route(&msg{
-				Src: name,
-				Tag: 0,
-			})
-		}
 	case reflect.Ptr:
 		ft := reflect.TypeOf(fptr)
 		fv := reflect.ValueOf(fptr)
@@ -181,12 +168,12 @@ func (r *router) RegisterName(name string, fptr interface{}) (err error) {
 	return
 }
 
-// Built-in function to register client & peer functions.
-func (s *router) register(req *msg) {
-	//var name string
-	//json.Unmarshal(req.Va1, &name)
-	s.connMapLock.RLock()
-	src := s.connMap[req.Src]
-	s.connMapLock.RUnlock()
-	s.add_route(req.Src, src)
+// Generates new *riphub.connection from net.Conn.
+func (r *router) addconnection(conn net.Conn) *connection {
+	return &connection{
+		conn:   conn,
+		router:   r,
+		routes: make([]string, 0),
+	}
 }
+

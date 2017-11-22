@@ -7,30 +7,30 @@ import (
 )
 type KV struct {
 	mlock sync.RWMutex
-	data  map[string]string
+	data  map[int]int
 }
 
 var myKV KV
 
 func init() {
-	myKV.data = make(map[string]string)
+	myKV.data = make(map[int]int)
 }
 
-func (c *KV) Set(key string, value *string) error {
+func (c *KV) Set(key int, value *int) error {
 	c.mlock.Lock()
 	defer c.mlock.Unlock()
 	c.data[key] = *value
 	return nil
 }
 
-func (c *KV) Get(key string, output *string) error {
+func (c *KV) Get(key int, value *int) error {
 	c.mlock.RLock()
 	defer c.mlock.RUnlock()
 	v, ok := c.data[key]
 	if !ok {
 		return fmt.Errorf("Key not found.")
 	}
-	*output = v
+	*value = v
 	return nil
 }
 

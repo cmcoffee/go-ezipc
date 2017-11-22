@@ -9,23 +9,29 @@ import (
 	"math/big"
 	"reflect"
 	"time"
-	"runtime"
-	"sync/atomic"
+)
+
+const (
+	REQUEST = 1 << iota
+	RELAY
+	END
 )
 
 type bucket struct {
+	flag int
 	done chan struct{}
 	data *msg
+	dst *connection 
+	src *connection
+	
 }
 
+var ErrFail = errors.New("Request failed, service unavailable.")
 var ErrBadTag = errors.New("Duplicate tag detected.")
+var ErrClosed = errors.New("Connection closed.")
 
 // Call invokes a registered method/function, blocks while actively checking for for completion, returns err on failure.
 func (r *router) Call(name string, arg interface{}, reply interface{}) (err error) {
-	for atomic.LoadUint32(&r.ready) == 0 {
-		runtime.Gosched()
-	}
-
 	data, err := json.Marshal(arg)
 	if err != nil {
 		return err
@@ -36,15 +42,24 @@ func (r *router) Call(name string, arg interface{}, reply interface{}) (err erro
 		return err
 	}
 
+	dest := r.uplink
+
 	new_request:
-	if r.uplink == nil {
+	if dest == nil {
+		r.connMapLock.RLock()
+		dest = r.connMap[name]
+		r.connMapLock.RUnlock()
+	} 
+
+	if dest == nil {
 		return ErrClosed
 	}
 
 	bucket, tag := r.getBucket()
 	bucket.data = nil
+	bucket.dst = dest
 
-	err = r.route(&msg{
+	dest.send(&msg{
 		Dst: name,
 		Va1: base64.StdEncoding.EncodeToString(data),
 		Va2: base64.StdEncoding.EncodeToString(data2),
@@ -93,16 +108,14 @@ func (r *router) Call(name string, arg interface{}, reply interface{}) (err erro
 
 		// Send busyCheck to see if we should continue waiting on reply.
 		case <-time.After(time.Millisecond * 300):
-			c := r.find_route(name)
-			if c == nil && r.uplink == nil {
-				reset_bucket()
+			if dest == nil {
 				return ErrClosed
-			} else {
-				r.route(&msg{
+			}
+			err = dest.send(&msg{
 					Dst: name,
 					Tag: tag * -1,
 				})
-			}
+			if err != nil { return err }
 			continue
 		}
 	}
@@ -111,26 +124,26 @@ func (r *router) Call(name string, arg interface{}, reply interface{}) (err erro
 
 // Checks to see if this is a response to a Call we've placed.
 func (s *router) intercept(req *msg) bool {
-	s.tagMapLock.RLock()
-	defer s.tagMapLock.RUnlock()
-	if res, ok := s.tagMap[req.Tag]; ok {
-		bucket := res.(*bucket)
+	s.tagMapLock.Lock()
+	defer s.tagMapLock.Unlock()
+	if bucket, ok := s.tagMap[req.Tag]; ok {
 		bucket.data = req
 		bucket.done <- struct{}{}
+		delete(s.tagMap, req.Tag)
 		return true
 	}
 	return false
 }
 
-// Creates a random 32bit tag for IPC calls.
-func genTag() int32 {
-	maxBig := *big.NewInt(int64(1<<31 - 1))
-	output, _ := rand.Int(rand.Reader, &maxBig)
-	return int32(output.Int64())
-}
-
 // Assigned Call a bucket to capture reply with.
 func (r *router) getBucket() (*bucket, int32) {
+
+	// Creates a random 32bit tag for IPC calls.
+	genTag := func() int32 {
+		maxBig := *big.NewInt(int64(1<<31 - 1))
+		output, _ := rand.Int(rand.Reader, &maxBig)
+		return int32(output.Int64())
+	}
 
 	// Generates a random number to serve as the ticket for this Call.
 	tag := genTag()
@@ -148,6 +161,7 @@ func (r *router) getBucket() (*bucket, int32) {
 			}
 		} else {
 			newBucket := &bucket{
+				flag: REQUEST,
 				data: nil,
 				done: make(chan struct{}),
 			}

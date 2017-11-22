@@ -8,7 +8,8 @@ import (
 
 func main() {
 	cl := blab.New()
-	cl.Debug = true
+
+	fmt.Println("Opening socket file...")
 
 	err := cl.Dial("/tmp/blab.sock")
 	if err != nil {
@@ -18,20 +19,20 @@ func main() {
 
 	start_time := time.Now()
 
-	fmt.Printf("Setting 10000 keys.\n")
 	var ( 
 		n int
 		i int
 	)
-	for i = 0; i < 10000; i++ {
+	for time.Since(start_time) < time.Second {
 		n = n + i
-		err = cl.Call("KV.Set", fmt.Sprintf("%d", i), fmt.Sprintf("%d", n))
+		err = cl.Call("KV.Set", i, n)
 		if err != nil {
 			fmt.Printf("Call failed: %s\n", err)
 			return
 		}
+		i++
 	}
-	fmt.Printf("Average time taken per request: %v.\n", time.Duration(float64(int64(time.Now().Sub(start_time)) / int64(i))));
+	fmt.Printf("\nPerformed %d requests in %v.\n", i, time.Since(start_time))
 
 	var x int
 
@@ -40,22 +41,22 @@ func main() {
 		fmt.Println(err)
 	}
 
-	var str string
+	var v int
 	for i := 0; i < 9; i++ {
-		err = cl.Call("KV.Get", fmt.Sprintf("%d", i), &str)
+		err = cl.Call("KV.Get", i, &v)
 		if err != nil {
 			fmt.Printf("Call failed: %s\n", err)
 			return
 		}
-		fmt.Printf("\nKey: %d, Value: %s\n", i, str)
+		fmt.Printf("\nKey: %d, Value: %d\n", i, v)
 	}
 
-	err = cl.Call("KV.Get", fmt.Sprintf("%d", x - 1), &str)
+	err = cl.Call("KV.Get", x -1 , &v)
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	fmt.Printf("\nKey: %d, Value: %s\n", x - 1, str)
+	fmt.Printf("\nKey: %d, Value: %d\n", x - 1, v)
 
 	fmt.Printf("\nTotal Keys: %d\n", x)
 }
