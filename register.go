@@ -1,16 +1,16 @@
 package blab
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"runtime"
 	"strings"
 	"unicode"
 	"unicode/utf8"
-	"encoding/base64"
-	"net"
 )
 
 // Wraps function to handle incoming and outgoing IPC msgs.
@@ -139,7 +139,7 @@ func (r *router) RegisterName(name string, fptr interface{}) (err error) {
 			conn: &connection{
 				routes: []string{name},
 				router: r,
-				exec: wFunc, 
+				exec:   wFunc,
 			},
 		})
 
@@ -172,8 +172,7 @@ func (r *router) RegisterName(name string, fptr interface{}) (err error) {
 func (r *router) addconnection(conn net.Conn) *connection {
 	return &connection{
 		conn:   conn,
-		router:   r,
+		router: r,
 		routes: make([]string, 0),
 	}
 }
-

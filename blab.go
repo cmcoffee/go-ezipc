@@ -26,11 +26,11 @@ Exported functions & methods should be made thread safe.
 package blab
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
 	"strings"
-	"fmt"
 )
 
 // Sets connection limit for maximum IPC connections.
@@ -44,11 +44,11 @@ func (r *router) SetLimiter(connlimit int) {
 // Creates a new blab router.
 func New() *router {
 	r := &router{
-		uplink:   nil,
+		uplink: nil,
 		//logg:      log.New(os.Stdout, "", log.LstdFlags),
-		tagMap:   make(map[int32]*bucket),
-		connMap:  make(map[string]*connection),
-		Debug: false,
+		tagMap:  make(map[int32]*bucket),
+		connMap: make(map[string]*connection),
+		Debug:   false,
 	}
 	r.SetLimiter(256)
 	return r

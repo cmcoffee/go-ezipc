@@ -2,8 +2,8 @@ package blab
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"math/big"
@@ -21,9 +21,8 @@ type bucket struct {
 	flag int
 	done chan struct{}
 	data *msg
-	dst *connection 
-	src *connection
-	
+	dst  *connection
+	src  *connection
 }
 
 var ErrFail = errors.New("Request failed, service unavailable.")
@@ -44,12 +43,12 @@ func (r *router) Call(name string, arg interface{}, reply interface{}) (err erro
 
 	dest := r.uplink
 
-	new_request:
+new_request:
 	if dest == nil {
 		r.connMapLock.RLock()
 		dest = r.connMap[name]
 		r.connMapLock.RUnlock()
-	} 
+	}
 
 	if dest == nil {
 		return ErrClosed
@@ -65,7 +64,9 @@ func (r *router) Call(name string, arg interface{}, reply interface{}) (err erro
 		Va2: base64.StdEncoding.EncodeToString(data2),
 		Tag: tag,
 	})
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	// Remove bucket from map.
 	reset_bucket := func() {
@@ -112,10 +113,12 @@ func (r *router) Call(name string, arg interface{}, reply interface{}) (err erro
 				return ErrClosed
 			}
 			err = dest.send(&msg{
-					Dst: name,
-					Tag: tag * -1,
-				})
-			if err != nil { return err }
+				Dst: name,
+				Tag: tag * -1,
+			})
+			if err != nil {
+				return err
+			}
 			continue
 		}
 	}

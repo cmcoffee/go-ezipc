@@ -19,7 +19,7 @@ func main() {
 
 	start_time := time.Now()
 
-	var ( 
+	var (
 		n int
 		i int
 	)
@@ -51,12 +51,12 @@ func main() {
 		fmt.Printf("\nKey: %d, Value: %d\n", i, v)
 	}
 
-	err = cl.Call("KV.Get", x -1 , &v)
+	err = cl.Call("KV.Get", x-1, &v)
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	fmt.Printf("\nKey: %d, Value: %d\n", x - 1, v)
+	fmt.Printf("\nKey: %d, Value: %d\n", x-1, v)
 
 	fmt.Printf("\nTotal Keys: %d\n", x)
 }

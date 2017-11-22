@@ -1,14 +1,14 @@
 package blab
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net"
-	"strings"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"bytes"
-	"io"
 )
 
 // IPC Connection.
@@ -48,11 +48,13 @@ func (c *connection) send(req *msg) (err error) {
 	if err != nil && req.Err != "" {
 		return
 	}
-	if err != nil  {
+	if err != nil {
 		if c.router.Debug {
 			fmt.Printf("Send failed: %s\n", err.Error())
 		}
-		if req.conn == nil { return ErrClosed }
+		if req.conn == nil {
+			return ErrClosed
+		}
 		send_err(req, ErrClosed)
 	}
 	return
