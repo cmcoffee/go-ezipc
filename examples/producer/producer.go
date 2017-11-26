@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/cmcoffee/go-blab"
+	"github.com/cmcoffee/go-ezipc"
 	"sync"
 )
 
@@ -49,8 +49,7 @@ func Ping(unused int, unused2 *int) error {
 }
 
 func main() {
-	cl := blab.New()
-	cl.Debug = false
+	cl := ezipc.New()
 
 	err := cl.Register(&myKV)
 	if err != nil {
@@ -68,7 +67,7 @@ func main() {
 	fmt.Println("Listening for requests!")
 
 	err = cl.Listen("/tmp/blab.sock")
-	if err != blab.ErrClosed {
+	if err != ezipc.ErrClosed {
 		fmt.Printf("Connection Error: %s\n", err)
 		return
 	}

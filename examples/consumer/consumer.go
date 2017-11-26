@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/cmcoffee/go-blab"
+	"github.com/cmcoffee/go-ezipc"
 	"time"
 )
 
 func main() {
-	cl := blab.New()
+	cl := ezipc.New()
 
 	fmt.Println("Opening socket file...")
 

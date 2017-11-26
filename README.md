@@ -1,15 +1,10 @@
 
-# blab
-    import "github.com/cmcoffee/go-blab"
+# ezipc
+    import "."
 
-Package blab provides a means of creating a network of methods/functions.
+Package ezipc provides a simple framework to allow for communication between multiple background processes.
 
-Callers include producers and consumers, producers may also connect to other producers.
-This first Caller to "Listen" doubles as a broker to direct all Calls.
-
-Once a Call is placed the first Caller/Listener will route the call to the appropriate producer who registered the method or function.
-
-blab has similar requirements for exporting functions that Go's native "rpc" package provides, however blab maps both functions and object methods.
+EzIPC has similar requirements for exporting functions that Go's native "rpc" package provides, however ezipc maps both functions and object methods.
 
 
 	1)the method or function requires two arguments, both exported (or builtin) types.
@@ -33,30 +28,20 @@ Exported functions & methods should be made thread safe.
 
 ## Variables
 ``` go
-var ConnectionLimit = 256
-```
-Limit maximum number of concurrent connections/processes.
-
-``` go
-var Debug = false
-```
-Enable Communication Debugging.
-
-``` go
 var ErrClosed = errors.New("Connection closed.")
 ```
 ``` go
-var ErrFail = errors.New("Request failed, service unavailable.")
+var ErrFail = errors.New("Call failed.")
 ```
 
 
-## type Caller
+## type EzIPC
 ``` go
-type Caller struct {
+type EzIPC struct {
     // contains filtered or unexported fields
 }
 ```
-The Caller object is for both producers(registering methods/functions) and consumers(calls registered methods/functions).
+EzIPC is common to both IPC clients and servers.
 
 
 
@@ -66,43 +51,42 @@ The Caller object is for both producers(registering methods/functions) and consu
 
 
 
-### func NewCaller
+### func New
 ``` go
-func NewCaller() *Caller
+func New() *EzIPC
 ```
-Allocates new Caller.
+Creates a new ezipc router.
 
 
 
 
-### func (\*Caller) Call
+### func (\*EzIPC) Call
 ``` go
-func (cl *Caller) Call(name string, arg interface{}, reply interface{}) (err error)
+func (e *EzIPC) Call(name string, arg interface{}, reply interface{}) (err error)
 ```
-Call invokes a registered method/function, blocks while actively checking for for completion and returns an error, if any.
+Call invokes a registered method/function, blocks while actively checking for for completion, returns err on failure.
 
 
 
-### func (\*Caller) Dial
+### func (\*EzIPC) Dial
 ``` go
-func (cl *Caller) Dial(socketf string) error
+func (e *EzIPC) Dial(socketf string) error
 ```
-Creates socket file(socketf) connection to Broker, forks goroutine and returns. (consumers)
+Dial is the client function of EzIPC, it opens a connection to the socket file.
 
 
 
-### func (\*Caller) Listen
+### func (\*EzIPC) Listen
 ``` go
-func (cl *Caller) Listen(socketf string) (err error)
+func (e *EzIPC) Listen(socketf string) (err error)
 ```
-Listens to socket files(socketf) for Callers.
-If socketf is not open, Listen opens the file and connects itself to it. (producers)
+Listens is the server function of EzIPC, it opens a connection and blocks while listening for requests.
 
 
 
-### func (\*Caller) Register
+### func (\*EzIPC) Register
 ``` go
-func (cl *Caller) Register(fptr interface{}) error
+func (e *EzIPC) Register(fptr interface{}) error
 ```
 Registers local methods or function, informs Broker of registration.
 Function/method template should follow:
@@ -111,19 +95,11 @@ func (*T) Name(argType T1, replyType *T2) error
 
 
 
-### func (\*Caller) RegisterName
+### func (\*EzIPC) RegisterName
 ``` go
-func (cl *Caller) RegisterName(name string, fptr interface{}) (err error)
+func (e *EzIPC) RegisterName(name string, fptr interface{}) (err error)
 ```
 RegisterName operates exactly as Register but allows changing the name of the object or function.
-
-
-
-### func (\*Caller) SetOutput
-``` go
-func (cl *Caller) SetOutput(w io.Writer)
-```
-Directs error output to a specified io.Writer, defaults to os.Stdout.
 
 
 

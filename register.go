@@ -1,4 +1,4 @@
-package blab
+package ezipc
 
 import (
 	"encoding/base64"
@@ -114,10 +114,10 @@ func wrapFunc(fptr interface{}) (newFunc func(*msg) *msg, err error) {
 // Function/method template should follow:
 // func name(argType T1, replyType *T2) error
 // func (*T) Name(argType T1, replyType *T2) error
-func (r *router) Register(fptr interface{}) error { return r.RegisterName("", fptr) }
+func (e *EzIPC) Register(fptr interface{}) error { return e.RegisterName("", fptr) }
 
 // RegisterName operates exactly as Register but allows changing the name of the object or function.
-func (r *router) RegisterName(name string, fptr interface{}) (err error) {
+func (e *EzIPC) RegisterName(name string, fptr interface{}) (err error) {
 	// Allows registration of both functions and methods.
 	// Register function if provided function, register all methods if provided an object.
 
@@ -133,12 +133,12 @@ func (r *router) RegisterName(name string, fptr interface{}) (err error) {
 		}
 
 		// Add wrapped method to local method map.
-		r.route(&msg{
+		e.route(&msg{
 			Dst: name,
 			Tag: 0,
 			conn: &connection{
 				routes: []string{name},
-				router: r,
+				router: e,
 				exec:   wFunc,
 			},
 		})
@@ -156,7 +156,7 @@ func (r *router) RegisterName(name string, fptr interface{}) (err error) {
 			if unicode.ToUpper(method_ch) != method_ch {
 				continue
 			}
-			err_s := r.RegisterName(method_name, method.Interface())
+			err_s := e.RegisterName(method_name, method.Interface())
 			if err_s != nil {
 				return fmt.Errorf("Registration failed for [%s.%s]: %s", name, ft.Method(i).Name, err_s)
 			}
@@ -169,10 +169,10 @@ func (r *router) RegisterName(name string, fptr interface{}) (err error) {
 }
 
 // Generates new *riphub.connection from net.Conn.
-func (r *router) addconnection(conn net.Conn) *connection {
+func (e *EzIPC) addconnection(conn net.Conn) *connection {
 	return &connection{
 		conn:   conn,
-		router: r,
+		router: e,
 		routes: make([]string, 0),
 	}
 }
