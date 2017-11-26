@@ -1,6 +1,6 @@
 
 # ezipc
-    import "."
+    import "github.com/cmcoffee/go-ezipc"
 
 Package ezipc provides a simple framework to allow for communication between multiple background processes.
 
