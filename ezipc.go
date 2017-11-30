@@ -324,10 +324,14 @@ func (e *EzIPC) route(req *msg) {
 
 		e.tagMap[tag] = nb
 
-		// Execute local function if possible.
+		// Execute local function as go routine if possible.
 		if dest.exec != nil {
-			req.conn.send(dest.exec(req))
-			delete(e.tagMap, tag)
+			go func(tag int32, req *msg, e *EzIPC) {
+				req.conn.send(dest.exec(req))
+				e.tagMapLock.Lock()
+				defer e.tagMapLock.Unlock()
+				delete(e.tagMap, tag)
+			}(tag, req, e)
 		} else {
 			dest.send(req)
 		}
